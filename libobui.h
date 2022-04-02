@@ -1,6 +1,52 @@
 #ifndef LIBOBUI_H
 #define LIBOBUI_H
 
+/*
+ * LibOBUI - Library One Button User Interface
+ *
+ * Tiny library implementing a menu user interface controlled by a
+ * single button, to press shortly to scroll values/menu or for
+ * long to make a choice.
+ *
+ * intro:
+ *	----------------
+ *	 HootPlate
+ *	 v0.2
+ *	----------------
+ *
+ * menu: short=next long=select
+ *
+ *	----------------
+ *	 Stop
+ *	 o . . . . .
+ *	----------------
+ *	 Rework mode
+ *	 . o . . . .
+ *	----------------
+ *	 [...]
+ *	----------------
+ *	 Manual mode
+ *	 . . . . . o
+ *	----------------
+ *
+ * input: short=increase/wrap long=save
+ *
+ *	----------------
+ *	 heat: 100%
+ *
+ *	----------------
+ *
+ * status: short=pause long=menu
+ *
+ *	----------------
+ *	 Reflow mode
+ *	 heat:  30%
+ *	----------------
+ *
+ * The developer needs to call `obui_init(config)` with config a
+ * `obui_config` structure describing the user interface.
+ */
+
 enum obui_event {
 	OBUI_EVENT_NONE,
 	OBUI_EVENT_MODE_SELECTED,
@@ -14,98 +60,167 @@ enum obui_press {
 };
 
 enum obui_screen {
-	OBUI_SCREEN_MENU,
-	OBUI_SCREEN_INPUT,
+	OBUI_SCREEN_SELECT_MODE,
+	OBUI_SCREEN_SELECT_VALUE,
 	OBUI_SCREEN_STATUS,
 };
 
+enum obui_button {
+	OBUI_BUTTON_RELEASED,
+	OBUI_BUTTON_PRESSED,
+};
+
 struct obui_param {
-	char *name, *unit;
-	int64_t min, max, steps, value;
+	char const *name, *unit;
+	uint64_t min, max, step, value;
 };
 
 struct obui_mode {
-	struct obui_param *param_list;
-	size_t param_num;
+	char const *name;
+	struct obui_param **params;
 };
 
 struct obui_config {
-	char *name, *version;
-
-	uint16_t width_pixel, height_pixel;
-
-	struct obui_mode *mode_list;
-	size_t mode_num;
+	uint16_t long_press_ms;
+	char const *name, *version;
+	struct obui_param *main;
+	struct obui_mode **modes;
 };
 
-static struct obui_config *obui_config;
-static struct obui_mode *obui_mode;
-static enum obui_press volatile obui_press;
-static enum obui_screen obui_screen;
-static size_t obui_select_mode;
-static size_t obui_select_param;
-static int64_t obui_select_value;
+/*
+ * Function printing a text string with a 10px tall font.
+ */
+extern uint16_t obui_fn_draw_text_10px(uint16_t x, uint16_t y, char const *text);
 
-static void
+/*
+ * Function printing a text string with a 16px tall font.
+ */
+extern uint16_t obui_fn_draw_text_16px(uint16_t x, uint16_t y, char const *text);
+
+/*
+ * Function clearing the screen buffer.
+ */
+extern void obui_fn_clear_screen(void);
+
+/*
+ * Function flushing the screen buffer to the device.
+ */
+extern void obui_fn_flush_screen(void);
+
+/*
+ * Function formatting an integer `num` into a buffer `buf` of size `sz`
+ */
+extern void obui_fn_fmtint(char *buf, size_t sz, uint64_t num);
+
+static struct obui_config		*obui_config;
+static struct obui_mode			*obui_mode;
+static struct obui_param		*obui_param;
+static enum obui_press volatile		 obui_press;
+static enum obui_screen			 obui_screen;
+static size_t				 obui_select_mode;
+static size_t				 obui_select_param;
+static uint64_t				 obui_select_value;
+
+static inline void
 obui_screen_intro(void)
 {
 	obui_fn_clear_screen();
+
 	obui_fn_draw_text_16px(0, 0, obui_config->name);
 	obui_fn_draw_text_10px(0, 16, obui_config->version);
+
 	obui_fn_flush_screen();
 }
 
-static void
-obui_screen_menu(void)
+static inline void
+obui_screen_select_mode(void)
 {
-	uint16_t pos_x = 0, bot_y;
-
-	bot_y = config->height_pixel - 10;
+	uint16_t pos_x = 0;
 
 	obui_fn_clear_screen();
-	obui_fn_draw_text_10px(0, 0, obui_mode->name);
-	for (size_t i = 0; i < config->mode_num; i++) {
-		char *dot = ".";
 
-		if (i == obui_screen_menu_selected)
-			dot = "o";
-		pos_x += obui_fn_draw_text_10px(pos_x, bot_y, dot) + 5;
+	obui_fn_draw_text_16px(0, 0, obui_mode->name);
+	for (size_t i = 0; obui_config->modes[i] != NULL; i++) {
+		char const *dot;
+
+		dot = (i == obui_select_mode) ? "." : "o";
+		pos_x += obui_fn_draw_text_10px(pos_x, 16, dot) + 5;
 	}
+
+	obui_fn_flush_screen();
+}
+
+static inline void
+obui_screen_select_value(void)
+{
+	char buf[50];
+	uint16_t pos_x;
+
+	obui_fn_clear_screen();
+
+	pos_x = 0;
+	pos_x += obui_fn_draw_text_10px(pos_x, 0, "set \"");
+	pos_x += obui_fn_draw_text_10px(pos_x, 0, obui_param->name);
+	pos_x += obui_fn_draw_text_10px(pos_x, 0, "\":");
+
+	obui_fn_fmtint(buf, sizeof buf, obui_param->value);
+	pos_x = 0;
+	pos_x += obui_fn_draw_text_10px(pos_x, 0, buf);
+	pos_x += obui_fn_draw_text_10px(pos_x, 0, obui_param->unit);
+
+	obui_fn_flush_screen();
+}
+
+static inline void
+obui_screen_status(void)
+{
+	char buf[50];
+	uint16_t pos_x;
+
+	obui_fn_clear_screen();
+
+	pos_x += obui_fn_draw_text_10px(pos_x, 0, "set \"");
+	pos_x += obui_fn_draw_text_10px(pos_x, 0, obui_param->name);
+	pos_x += obui_fn_draw_text_10px(pos_x, 0, "\":");
+
+	obui_fn_fmtint(buf, sizeof buf, obui_param->value);
+	pos_x = 32;
+	pos_x += obui_fn_draw_text_16px(pos_x, 0, buf);
+	pos_x += obui_fn_draw_text_16px(pos_x, 0, obui_config->main->unit);
+
 	obui_fn_flush_screen();
 }
 
 static void
-obui_screen_input(void)
+obui_refresh_screen(void)
 {
-	;
-}
-
-static void
-obui_init(struct obui_config *config)
-{
-	assert(config->name != NULL);
-	assert(config->version != NULL);
-	assert(config->width_pixel > 50);
-	assert(config->height_pixel > 16 + 10);
-
-	obui_config = config;
-	obui_screen = OBUI_SCREEN_MENU;
+	switch (obui_screen) {
+	case OBUI_SCREEN_SELECT_MODE:
+		obui_screen_select_mode();
+		break;
+	case OBUI_SCREEN_SELECT_VALUE:
+		obui_screen_select_value();
+		break;
+	case OBUI_SCREEN_STATUS:
+		obui_screen_status();
+		break;
+	}
 }
 
 static inline enum obui_event
-obui_event_menu(enum obui_press press)
+obui_event_select_mode(enum obui_press press)
 {
 	switch (press) {
 	case OBUI_PRESS_SHORT:
-		if (++obui_select_mode > obui_config->mode_num)
+		if (obui_config->modes[++obui_select_mode] == NULL)
 			obui_select_mode = 0;
-		obui_screen_mode();
 		break;
 	case OBUI_PRESS_LONG:
-		obui_mode = &obui_config->mode_list[obui_select_mode];
-		if (obui_mode->param_num > 0) {
-			obui_screen = OBUI_SCREEN_INPUT;
-			obui_param = &obui_mode->param_list[0];
+		obui_mode = obui_config->modes[obui_select_mode];
+		if (obui_mode->params[0] != NULL) {
+			obui_screen = OBUI_SCREEN_SELECT_VALUE;
+			obui_select_param = 0;
+			obui_param = obui_mode->params[0];
 		} else {
 			obui_screen = OBUI_SCREEN_STATUS;
 			return OBUI_EVENT_MODE_SELECTED;
@@ -118,7 +233,7 @@ obui_event_menu(enum obui_press press)
 }
 
 static inline enum obui_event
-obui_event_input(enum obui_press press)
+obui_event_select_value(enum obui_press press)
 {
 	switch (press) {
 	case OBUI_PRESS_SHORT:
@@ -126,13 +241,13 @@ obui_event_input(enum obui_press press)
 			obui_select_value = obui_param->min;
 		break;
 	case OBUI_PRESS_LONG:
-		obui_param->value = obui_select_param;
-		if (++obui_select_param > obui_mode->parm_num) {
-			obui_screen = OBUI_SCREEN_STATUS;
-			return OBUI_EVENT
-		} else {
-			obui_param = &obui_mode->param_list[obui_select_param];
+		obui_param->value = obui_select_value;
+		if (obui_mode->params[++obui_select_param] == NULL) {
+			obui_param = obui_mode->params[obui_select_param];
 			obui_select_value = obui_param->min;
+		} else {
+			obui_screen = OBUI_SCREEN_STATUS;
+			return OBUI_EVENT_MODE_SELECTED;
 		}
 		break;
 	case OBUI_PRESS_NONE:
@@ -146,9 +261,9 @@ obui_event_status(enum obui_press press)
 {
 	switch (press) {
 	case OBUI_PRESS_SHORT:
-		return OBUI_EVENT_QUICK_ACTION
+		return OBUI_EVENT_QUICK_ACTION;
 	case OBUI_PRESS_LONG:
-		obui_screen = OBUI_SCREEN_MENU;
+		obui_screen = OBUI_SCREEN_SELECT_MODE;
 		obui_select_mode = 0;
 		break;
 	case OBUI_PRESS_NONE:
@@ -157,32 +272,79 @@ obui_event_status(enum obui_press press)
 	return OBUI_EVENT_NONE;
 }
 
+/*
+ * Return the next obui event to be handled by the developer:
+ * - when returning to the status screen
+ * - when shortly pressing a button when on the status screen
+ *
+ * The global variables `obui_mode` and `obui_config` (only the
+ * config->modes[x]->params[x]->value fields) will be updated with
+ * the new configuration values chosen by the user.
+ */
 static enum obui_event
 obui_get_event(void)
 {
 	enum obui_event event;
 
-	do {
-		switch (obui_screen) {
-		case OBUI_SCREEN_MENU:
-			event = obui_event_menu(press);
-			break;
-		case OBUI_SCREEN_INPUT:
-			event = obui_event_input(press);
-			break;
-		case OBUI_SCREEN_STATUS:
-			event = obui_event_status(press);
-			break;
-		}
-	} while (event == OBUI_EVENT_NONE);
-
+	switch (obui_screen) {
+	case OBUI_SCREEN_SELECT_MODE:
+		event = obui_event_select_mode(obui_press);
+		break;
+	case OBUI_SCREEN_SELECT_VALUE:
+		event = obui_event_select_value(obui_press);
+		break;
+	case OBUI_SCREEN_STATUS:
+		event = obui_event_status(obui_press);
+		break;
+	}
+	if (event != OBUI_EVENT_NONE)
+		obui_refresh_screen();
 	return event;
 }
 
-static inline void
-obui_trigger_event(enum obui_press press)
+/*
+ * To call while a button was pressed to update obui's state machine.
+ */
+static void
+obui_set_button_state(enum obui_button state, uint64_t time_ms)
 {
-	obui_press = press;
+	static uint64_t last_pressed_ms = 0;
+	static enum obui_button last_state = OBUI_BUTTON_RELEASED;
+
+	switch (state) {
+	case OBUI_BUTTON_PRESSED:
+		if (last_state == OBUI_BUTTON_PRESSED)
+			return;
+		last_pressed_ms = time_ms;
+		break;
+	case OBUI_BUTTON_RELEASED:
+		if (last_state == OBUI_BUTTON_RELEASED)
+			return;
+		if (time_ms - last_pressed_ms >= obui_config->long_press_ms)
+			obui_press = OBUI_PRESS_LONG;
+		else
+			obui_press = OBUI_PRESS_SHORT;
+		break;
+	}
+	last_state = state;
+}
+
+/*
+ * Install the obui library configuration, used by all obui functions.
+ * It will also display the intro screen.
+ */
+static void
+obui_init(struct obui_config *config)
+{
+	assert(config->name != NULL);
+	assert(config->version != NULL);
+	assert(config->modes[0] != NULL);
+	assert(config->main != NULL);
+	assert(config->long_press_ms > 0);
+
+	obui_config = config;
+	obui_mode = config->modes[0];
+	obui_screen_intro();
 }
 
 #endif

@@ -1,4 +1,7 @@
 #include "libc.h"
+#include "libobui.h"
+#include "libdraw.h"
+#include "font.h"
 #include "registers.h"
 #include "functions.h"
 
@@ -56,48 +59,67 @@
 #define PWM_LIMIT_MAX						0x40	// TODO: untested
 
 /*
- * Current heat mode, selected from interrupt
+ * libobui config
  */
-volatile enum mode {
-	MODE_OFF,
-	MODE_SMT_ACTIVATE, MODE_SMT_SOLDER, MODE_REWORK, MODE_REFLOW, MODE_MAX,
-	MODE_END
-} current_mode;
-.
-static void
-set_mode(enum mode mode)
-{
-	switch (mode) {
-	case MODE_OFF:
-		pwm_set_duty_cycle(TC1_COUNT8, 0, PWM_OFF);
-		break;
-	case MODE_SMT_ACTIVATE:
-		pwm_set_duty_cycle(TC1_COUNT8, 0, PWM_SMT_ACTIVATE_PASTE);
-		break;
-	case MODE_SMT_SOLDER:
-		pwm_set_duty_cycle(TC1_COUNT8, 0, PWM_SMT_SOLDER_PASTE);
-		break;
-	case MODE_REWORK:
-		pwm_set_duty_cycle(TC1_COUNT8, 0, PWM_OPTIMAL_FOR_REWORK);
-		break;
-	case MODE_REFLOW:
-		pwm_set_duty_cycle(TC1_COUNT8, 0, PWM_OPTIMAL_FOR_REFLOW);
-		break;
-	case MODE_MAX:
-		pwm_set_duty_cycle(TC1_COUNT8, 0, PWM_LIMIT_MAX);
-		break;
-	case MODE_END:
-		pwm_set_duty_cycle(TC1_COUNT8, 0, PWM_OFF);
-		assert(!"mode overflow");
-	}
-}
+struct obui_param param_heat = {
+	.name = "heat",
+	.unit = "%",
+	.min = 0,
+	.max = 100,
+	.step = 10,
+};
+struct obui_mode mode_stop = {
+	.name = "Stop",
+	.params = (struct obui_param *[]){
+		NULL
+	},
+};
+struct obui_mode mode_smt_activate = {
+	.name = "SMT Activate Mode",
+	.params = (struct obui_param *[]){
+		NULL
+	},
+};
+struct obui_mode mode_smt_solder = {
+	.name = "SMT Solder Mode",
+	.params = (struct obui_param *[]){
+		NULL
+	},
+};
+struct obui_mode mode_rework = {
+	.name = "Rework Mode",
+	.params = (struct obui_param *[]){
+		NULL
+	},
+};
+struct obui_mode mode_reflow = {
+	.name = "Reflow Mode",
+	.params = (struct obui_param *[]){
+		NULL
+	},
+};
+struct obui_mode mode_manual = {
+	.name = "Manual Mode",
+	.params = (struct obui_param *[]){
+		&param_heat,
+		NULL
+	},
+};
+struct obui_config config = {
+	.name = "HootPlate",
+	.version = "v0.1",
+	.main = &param_heat,
+	.modes = (struct obui_mode *[]){
+                &mode_stop, &mode_smt_activate, &mode_smt_solder,
+                &mode_rework, &mode_manual,
+		NULL
+	},
+};
 
-void
-button_press_interrupt(void)
+uint16_t
+obui_fn_draw_text_16px(uint16_t x, uint16_t y, char const *text)
 {
-	current_mode++;
-	if (current_mode == MODE_END)
-		current_mode = MODE_OFF;
+	return draw_text(x, y, UINT16_MAX, &text, progmem_ascii_13);
 }
 
 int
@@ -108,12 +130,38 @@ main(void)
 	clock_init_generator(GCLK_GENCTRL_ID_GCLKGEN0, GCLK_GENCTRL_SRC_OSCULP32K, 1);
 	clock_init(GCLK_CLKCTRL_ID_TC1_TC2, GCLK_GENCTRL_ID_GCLKGEN0);
 
+	systick_init(GCLK_GENCTRL_ID_GCLKGEN1);
+
 	pwm_init(TC1_COUNT8, TC_COUNT8_CTRLA_PRESCALER_DIV64);
 	pwm_init_counter(4);
 
-	for (;;) {
-		set_mode(MODE_REWORK);
-	}
+	obui_init(&config);
 
+	for (;;) {
+		while (obui_get_event() == OBUI_EVENT_NONE);
+
+		if (obui_mode == &mode_stop) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 PWM_OFF);
+		} else if (obui_mode == &mode_smt_activate) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 PWM_SMT_ACTIVATE_PASTE);
+		} else if (obui_mode == &mode_smt_solder) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 PWM_SMT_SOLDER_PASTE);
+		} else if (obui_mode == &mode_rework) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 PWM_OPTIMAL_FOR_REWORK);
+		} else if (obui_mode == &mode_reflow) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 PWM_OPTIMAL_FOR_REFLOW);
+		} else if (obui_mode == &mode_manual) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 param_heat.value * PWM_LIMIT_MAX / param_heat.max);
+		} else {
+			pwm_set_duty_cycle(TC1_COUNT8, 0, PWM_OFF);
+			assert(!"invalid mode!");
+		}
+	}
 	return 0;
 }
