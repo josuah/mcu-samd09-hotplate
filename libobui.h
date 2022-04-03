@@ -1,68 +1,11 @@
 #ifndef LIBOBUI_H
 #define LIBOBUI_H
 
-/*
- * LibOBUI - Library One Button User Interface
- *
- * Tiny library implementing a menu user interface controlled by a
- * single button, to press shortly to scroll values/menu or for
- * long to make a choice.
- *
- * intro:
- *	----------------
- *	 HootPlate
- *	 v0.2
- *	----------------
- *
- * menu: short=next long=select
- *
- *	----------------
- *	 Stop
- *	 o . . . . .
- *	----------------
- *	 Rework mode
- *	 . o . . . .
- *	----------------
- *	 [...]
- *	----------------
- *	 Manual mode
- *	 . . . . . o
- *	----------------
- *
- * input: short=increase/wrap long=save
- *
- *	----------------
- *	 heat: 100%
- *
- *	----------------
- *
- * status: short=pause long=menu
- *
- *	----------------
- *	 Reflow mode
- *	 heat:  30%
- *	----------------
- *
- * The developer needs to call `obui_init(config)` with config a
- * `obui_config` structure describing the user interface.
- */
 
 enum obui_event {
 	OBUI_EVENT_NONE,
 	OBUI_EVENT_MODE_SELECTED,
 	OBUI_EVENT_QUICK_ACTION,
-};
-
-enum obui_press {
-	OBUI_PRESS_NONE,
-	OBUI_PRESS_SHORT,
-	OBUI_PRESS_LONG,
-};
-
-enum obui_screen {
-	OBUI_SCREEN_SELECT_MODE,
-	OBUI_SCREEN_SELECT_VALUE,
-	OBUI_SCREEN_STATUS,
 };
 
 enum obui_button {
@@ -87,30 +30,44 @@ struct obui_config {
 	struct obui_mode **modes;
 };
 
-/*
- * Function printing a text string with a 10px tall font.
- */
-extern uint16_t obui_fn_draw_text_10px(uint16_t x, uint16_t y, char const *text);
-
-/*
- * Function printing a text string with a 16px tall font.
- */
-extern uint16_t obui_fn_draw_text_16px(uint16_t x, uint16_t y, char const *text);
-
-/*
- * Function clearing the screen buffer.
- */
+/* set to a function clearing the screen buffer */
 extern void obui_fn_clear_screen(void);
 
-/*
- * Function flushing the screen buffer to the device.
- */
+/* set to a function flushing the screen buffer to the device */
 extern void obui_fn_flush_screen(void);
 
-/*
- * Function formatting an integer `num` into a buffer `buf` of size `sz`
- */
+/* set to a function formatting an integer `num` into a buffer `buf` of size `sz` */
 extern void obui_fn_fmtint(char *buf, size_t sz, uint64_t num);
+
+/* set to a function printing a text string with a 10px tall font */
+extern uint16_t obui_fn_draw_text_10px(uint16_t x, uint16_t y, char const *text);
+
+/* set to a function printing a text string with a 16px tall font */
+extern uint16_t obui_fn_draw_text_16px(uint16_t x, uint16_t y, char const *text);
+
+/* next event to be handled, after `obui_mode` and `obui_config` got updated */
+static enum obui_event obui_get_event(void);
+
+/* install `config` used by all obui functions and display the intro screen */
+static void obui_init(struct obui_config *config);
+
+/* call while a button was pressed to update obui's state machine */
+static void obui_set_button_state(enum obui_button state, uint64_t time_ms);
+
+
+/// POLICE LINE /// DO NOT CROSS ///
+
+
+enum obui_press {
+	OBUI_PRESS_NONE,
+	OBUI_PRESS_SHORT,
+	OBUI_PRESS_LONG,
+};
+enum obui_screen {
+	OBUI_SCREEN_SELECT_MODE,
+	OBUI_SCREEN_SELECT_VALUE,
+	OBUI_SCREEN_STATUS,
+};
 
 static struct obui_config		*obui_config;
 static struct obui_mode			*obui_mode;
@@ -179,6 +136,7 @@ obui_screen_status(void)
 
 	obui_fn_clear_screen();
 
+	pos_x = 0;
 	pos_x += obui_fn_draw_text_10px(pos_x, 0, "set \"");
 	pos_x += obui_fn_draw_text_10px(pos_x, 0, obui_param->name);
 	pos_x += obui_fn_draw_text_10px(pos_x, 0, "\":");
@@ -272,15 +230,6 @@ obui_event_status(enum obui_press press)
 	return OBUI_EVENT_NONE;
 }
 
-/*
- * Return the next obui event to be handled by the developer:
- * - when returning to the status screen
- * - when shortly pressing a button when on the status screen
- *
- * The global variables `obui_mode` and `obui_config` (only the
- * config->modes[x]->params[x]->value fields) will be updated with
- * the new configuration values chosen by the user.
- */
 static enum obui_event
 obui_get_event(void)
 {
@@ -302,9 +251,6 @@ obui_get_event(void)
 	return event;
 }
 
-/*
- * To call while a button was pressed to update obui's state machine.
- */
 static void
 obui_set_button_state(enum obui_button state, uint64_t time_ms)
 {
@@ -329,10 +275,6 @@ obui_set_button_state(enum obui_button state, uint64_t time_ms)
 	last_state = state;
 }
 
-/*
- * Install the obui library configuration, used by all obui functions.
- * It will also display the intro screen.
- */
 static void
 obui_init(struct obui_config *config)
 {

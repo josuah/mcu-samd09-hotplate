@@ -2,6 +2,7 @@
 #include "libobui.h"
 #include "libdraw.h"
 #include "font.h"
+#include "libssd1306.h"
 #include "registers.h"
 #include "functions.h"
 
@@ -117,9 +118,52 @@ struct obui_config config = {
 };
 
 uint16_t
+obui_fn_draw_text_10px(uint16_t x, uint16_t y, char const *text)
+{
+	return draw_text(x, y, UINT16_MAX, &text, progmem_font_8);
+}
+
+uint16_t
 obui_fn_draw_text_16px(uint16_t x, uint16_t y, char const *text)
 {
-	return draw_text(x, y, UINT16_MAX, &text, progmem_ascii_13);
+	return draw_text(x, y, UINT16_MAX, &text, progmem_font_13);
+}
+
+void
+obui_fn_flush_screen(void)
+{
+	ssd1306_flush();
+}
+
+void
+obui_fn_clear_screen(void)
+{
+	ssd1306_clear();
+}
+
+void
+obui_fn_fmtint(char *buf, size_t sz, uint64_t num)
+{
+	fmtint(buf, sz, num, 10);
+}
+
+uint8_t
+draw_fn_get_font_byte(uint8_t const *ptr)
+{
+	return *ptr;
+}
+
+void
+draw_fn_point(uint16_t x, uint16_t y)
+{
+	ssd1306_draw_point(x, y);
+}
+
+int
+ssd1306_fn_i2c_write(uint8_t addr, uint8_t const *buf, size_t sz)
+{
+	i2c_master_queue_tx(I2C0_MASTER, addr, buf, sz);
+	return i2c_master_wait(I2C0_MASTER);
 }
 
 int
@@ -130,11 +174,11 @@ main(void)
 	clock_init_generator(GCLK_GENCTRL_ID_GCLKGEN0, GCLK_GENCTRL_SRC_OSCULP32K, 1);
 	clock_init(GCLK_CLKCTRL_ID_TC1_TC2, GCLK_GENCTRL_ID_GCLKGEN0);
 
-	systick_init(GCLK_GENCTRL_ID_GCLKGEN1);
-
 	pwm_init(TC1_COUNT8, TC_COUNT8_CTRLA_PRESCALER_DIV64);
 	pwm_init_counter(4);
 
+	if (ssd1306_init() != 0)
+		assert(!"there is no use");
 	obui_init(&config);
 
 	for (;;) {

@@ -1,25 +1,27 @@
 #ifndef LIBDRAW_H
 #define LIBDRAW_H
 
-/*
- * Describes how to draw a single symbol of a font.
- */
+
+/* set to a function printint one pixel at (`x`, `y`) */
+extern void draw_fn_point(uint16_t x, uint16_t y);
+
+/* set to a function that reads one byte at `ptr` from ROM */
+extern uint8_t draw_fn_get_font_byte(uint8_t const *ptr);
+
+/* draw a line between point (`x0`, `y0`) and (`x1`, `y1) */
+static void draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+
+/* draw *`sp` with `font` at (`x`, `y`) until `max` and update `sp` */
+static uint16_t draw_text(uint16_t x, uint16_t y, uint16_t max, char const **sp, uint8_t const *font);
+
+
+/// POLICE LINE /// DO NOT CROSS ///
+
+
 struct draw_glyph {
 	uint8_t width, height;
 	uint8_t const *bitmap;
 };
-
-/*
- * To be set to a function that reads one byte of the font at `ptr` position
- * font from the ROM
- */
-extern uint8_t draw_fn_get_font_byte(uint8_t const *ptr);
-
-/*
- * To be set to a function that prints one pixel at coordinates (`x`, `y`)
- * starting from top left corner
- */
-extern void draw_fn_point(uint16_t x, uint16_t y);
 
 static inline struct draw_glyph
 draw_get_glyph(uint8_t const *font, char c)
@@ -38,9 +40,6 @@ draw_get_glyph(uint8_t const *font, char c)
 	return g;
 }
 
-/*
- * draw a line between point (`x0`, `y0`) and (`x1`, `y1)
- */
 static void
 draw_line(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
@@ -87,19 +86,15 @@ draw_glyph(uint16_t x, uint16_t y, struct draw_glyph g)
 	}
 }
 
-/*
- * Draw string pointed by `ps` with font `f` at position `p` until `x` then
- * return the new absolute position of p with only vertical position changed
- */
 static uint16_t
-draw_text(uint16_t x, uint16_t y, uint16_t max, char const **sp, uint8_t const *f)
+draw_text(uint16_t x, uint16_t y, uint16_t max, char const **sp, uint8_t const *font)
 {
 	char const *s;
 
 	for (s = *sp; *s != '\0'; s++) {
 		struct draw_glyph g;
 
-		g = draw_get_glyph(f, isprint(*s) ? *s : '?');
+		g = draw_get_glyph(font, isprint(*s) ? *s : '?');
 		if (x + g.width > max)
 			break;
 		draw_glyph(x, y, g);
