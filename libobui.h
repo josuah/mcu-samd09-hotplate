@@ -39,10 +39,10 @@ extern void obui_fn_flush_screen(void);
 /* set to a function formatting an integer `num` into a buffer `buf` of size `sz` */
 extern void obui_fn_fmtint(char *buf, size_t sz, uint64_t num);
 
-/* set to a function printing a text string with a 10px tall font */
+/* set to a function printing a text string with a 10px tall line */
 extern uint16_t obui_fn_draw_text_10px(uint16_t x, uint16_t y, char const *text);
 
-/* set to a function printing a text string with a 16px tall font */
+/* set to a function printing a text string with a 16px tall line */
 extern uint16_t obui_fn_draw_text_16px(uint16_t x, uint16_t y, char const *text);
 
 /* next event to be handled, after `obui_mode` and `obui_config` got updated */
@@ -283,6 +283,9 @@ obui_init(struct obui_config *config)
 	assert(config->modes[0] != NULL);
 	assert(config->main != NULL);
 	assert(config->long_press_ms > 0);
+
+	PORT->DIRSET = 1u << 27;
+	PORT->OUTSET = 1u << 27;
 
 	obui_config = config;
 	obui_mode = config->modes[0];
