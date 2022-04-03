@@ -7,8 +7,64 @@
 #include "libobui.h"
 #include "font.h"
 
-#define I2C1_MASTER_SCL 23
-#define I2C1_MASTER_SDA 22
+#define I2C1_MASTER_SCL		23
+#define I2C1_MASTER_SDA		22
+
+#define SWITCH		5
+
+/*
+ * All tests are done by letting the board heat during 5 min with
+ * a thin foil of tin at the top.
+ *
+ * Tin melting temperature: 231.93 °C
+ */
+
+/*
+ * Let the plate cool down.
+ */
+#define PWM_OFF							0x00
+
+/*
+ * 1st phase of SMT soldering: activate the solder paste
+ */
+#define PWM_SMT_ACTIVATE_PASTE					0x00	// TODO: untested
+
+/*
+ * 2nd phase of SMT soldering: raise the temperature to solder
+ */
+#define PWM_SMT_SOLDER_PASTE					0x00	// TODO: untested
+
+/*
+ * Anything hotter than that might make the tin at the bottom of
+ * the board melt without adding hot air.
+ */
+#define PWM_OPTIMAL_FOR_REWORK					0x15	// TODO: untested
+
+/*
+ * After a long time, the tin foil becomes in-between liquid and
+ * solid, even when touching it with more tin, never forming a ball.
+ */
+#define PWM_LIMIT_TIN_MELTING					0x20
+
+/*
+ * The tin foil immediately changes its shape, but not to the point
+ * of forming a ball on its own, although touching it with a tin wire
+ * makes it become a melted tin shiny ball.
+ */
+#define PWM_LIMIT_TIN_FLOWING					0x26
+
+/*
+ * At this temperature, the tin foil becomes liquid forming a ball
+ * on its own, without the need to touch it
+ */
+#define PWM_OPTIMAL_FOR_REFLOW					0x30
+
+/*
+ * At this temperature, the hot plate operates fine, no smoke appears,
+ * no bad smell comes-up, the support or plastic do not over-heat.
+ */
+#define PWM_LIMIT_MAX						0x40	// TODO: untested
+
 
 struct obui_param param_heat = {
 	.name = "heat",
@@ -98,7 +154,7 @@ obui_fn_fmtint(char *buf, size_t sz, uint64_t num)
 
 int
 ssd1306_fn_i2c_write(uint8_t addr, uint8_t const *buf, size_t sz)
-{
+{ 
 	i2c_master_queue_tx(I2C1_MASTER, addr, buf, sz);
 	return i2c_master_wait(I2C1_MASTER);
 }
@@ -118,15 +174,57 @@ draw_fn_point(uint16_t x, uint16_t y)
 int
 main(void)
 {
+	int switch_prev = 0;
+
 	power_on_sercom(1);
 
 	clock_init(GCLK_CLKCTRL_ID_SERCOM1_CORE, GCLK_GENCTRL_ID_GCLKGEN0);
 	clock_init(GCLK_CLKCTRL_ID_SERCOMX_SLOW, GCLK_GENCTRL_ID_GCLKGEN1);
+	clock_init(GCLK_CLKCTRL_ID_TC1_TC2, GCLK_GENCTRL_ID_GCLKGEN3);
 
 	i2c_master_init(I2C1_MASTER, 400000, I2C1_MASTER_SCL, I2C1_MASTER_SDA);
 	ssd1306_init();
 	obui_init(&config);
-	ssd1306_flush();
 
+	pwm_init(TC1_COUNT8, TC_COUNT8_CTRLA_PRESCALER_DIV64);
+	pwm_init_counter(4);
+	ssd1306_init();
+	obui_init(&config);
+
+	for (;;) {
+		int switch_pin;
+
+		while ((switch_pin = (PORT->IN << SWITCH) & 1) == switch_prev);
+		switch_prev = switch_pin;
+		obui_set_button_state(switch_pin, 0);
+
+		switch (obui_get_event()) {
+		case OBUI_EVENT_NONE:
+			continue;
+		}
+
+		if (obui_mode == &mode_stop) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 PWM_OFF);
+		} else if (obui_mode == &mode_smt_activate) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 PWM_SMT_ACTIVATE_PASTE);
+		} else if (obui_mode == &mode_smt_solder) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 PWM_SMT_SOLDER_PASTE);
+		} else if (obui_mode == &mode_rework) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 PWM_OPTIMAL_FOR_REWORK);
+		} else if (obui_mode == &mode_reflow) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 PWM_OPTIMAL_FOR_REFLOW);
+		} else if (obui_mode == &mode_manual) {
+			pwm_set_duty_cycle(TC1_COUNT8, 0,
+			 param_heat.value * PWM_LIMIT_MAX / param_heat.max);
+		} else {
+			pwm_set_duty_cycle(TC1_COUNT8, 0, PWM_OFF);
+			assert(!"invalid mode!");
+		}
+	}
 	return 0;
 }
