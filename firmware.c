@@ -9,15 +9,8 @@
 
 #define I2C1_MASTER_SCL		23
 #define I2C1_MASTER_SDA		22
-
-#define SWITCH		5
-
-/*
- * All tests are done by letting the board heat during 5 min with
- * a thin foil of tin at the top.
- *
- * Tin melting temperature: 231.93 °C
- */
+#define BUTTON			15
+#define PWM			4
 
 /*
  * Let the plate cool down.
@@ -65,62 +58,59 @@
  */
 #define PWM_LIMIT_MAX						0x40	// TODO: untested
 
-
-struct obui_param param_heat = {
+/*
+ * libobui configuration
+ */
+static struct obui_param param_heat = {
 	.name = "heat",
 	.unit = "%",
 	.min = 0,
 	.max = 100,
 	.step = 10,
 };
-struct obui_mode mode_stop = {
-	.name = "Stop",
-	.params = (struct obui_param *[]){
-		NULL
-	},
-};
-struct obui_mode mode_smt_activate = {
+static struct obui_mode mode_smt_activate = {
 	.name = "SMT Activate Mode",
 	.params = (struct obui_param *[]){
 		NULL
 	},
 };
-struct obui_mode mode_smt_solder = {
+static struct obui_mode mode_smt_solder = {
 	.name = "SMT Solder Mode",
 	.params = (struct obui_param *[]){
 		NULL
 	},
 };
-struct obui_mode mode_rework = {
+static struct obui_mode mode_rework = {
 	.name = "Rework Mode",
 	.params = (struct obui_param *[]){
 		NULL
 	},
 };
-struct obui_mode mode_reflow = {
+static struct obui_mode mode_reflow = {
 	.name = "Reflow Mode",
 	.params = (struct obui_param *[]){
 		NULL
 	},
 };
-struct obui_mode mode_manual = {
+static struct obui_mode mode_manual = {
 	.name = "Manual Mode",
 	.params = (struct obui_param *[]){
-		&param_heat,
-		NULL
+		&param_heat, NULL
 	},
 };
-struct obui_config config = {
-	.name = "HootPlate",
+static struct obui_config config = {
+	.name = "IsHotPlate",
 	.version = "v0.1",
-	.long_press_ms = 500,
+	.long_press_ms = 50,
 	.main = &param_heat,
 	.modes = (struct obui_mode *[]){
-		&mode_stop, &mode_smt_activate, &mode_smt_solder,
-		&mode_rework, &mode_manual,
-		NULL
+		&mode_smt_activate, &mode_smt_solder, &mode_rework,
+		&mode_manual, NULL
 	},
 };
+
+static uint8_t heat_current_pwm;
+static uint8_t heat_last_pwm;
 
 uint16_t
 obui_fn_draw_text_10px(uint16_t x, uint16_t y, char const *text)
@@ -171,59 +161,77 @@ draw_fn_point(uint16_t x, uint16_t y)
 	ssd1306_draw_point(x, y);
 }
 
+static void
+heat_set_value_pwm(uint8_t pwm)
+{
+	heat_current_pwm = pwm;
+	param_heat.value = 100 * pwm / PWM_LIMIT_MAX;
+	pwm_set_duty_cycle(TC1_COUNT8, 0, pwm);
+}
+
+static inline void
+heat_update(void)
+{
+	if (obui_mode == &mode_smt_activate) {
+		heat_set_value_pwm(PWM_SMT_ACTIVATE_PASTE);
+	} else if (obui_mode == &mode_smt_solder) {
+		heat_set_value_pwm(PWM_SMT_SOLDER_PASTE);
+	} else if (obui_mode == &mode_rework) {
+		heat_set_value_pwm(PWM_OPTIMAL_FOR_REWORK);
+	} else if (obui_mode == &mode_reflow) {
+		heat_set_value_pwm(PWM_OPTIMAL_FOR_REFLOW);
+	} else if (obui_mode == &mode_manual) {
+		heat_set_value_pwm(param_heat.value * PWM_LIMIT_MAX / param_heat.max);
+	} else {
+		heat_set_value_pwm(PWM_OFF);
+		assert(!"invalid mode!");
+	}
+}
+
+static inline void
+heat_play_pause(void)
+{
+	heat_set_value_pwm(heat_current_pwm == 0 ? heat_last_pwm : 0);
+}
+
+static inline void
+button_init(void)
+{
+	PORT->DIRCLR = 1u << BUTTON;
+	PORT->PINCFG[BUTTON] = PORT_PINCFG_INEN;
+}
+
 int
 main(void)
 {
-	int switch_prev = 0;
-
 	power_on_sercom(1);
 
 	clock_init(GCLK_CLKCTRL_ID_SERCOM1_CORE, GCLK_GENCTRL_ID_GCLKGEN0);
-	clock_init(GCLK_CLKCTRL_ID_SERCOMX_SLOW, GCLK_GENCTRL_ID_GCLKGEN1);
-	clock_init(GCLK_CLKCTRL_ID_TC1_TC2, GCLK_GENCTRL_ID_GCLKGEN3);
+	clock_init(GCLK_CLKCTRL_ID_SERCOMX_SLOW, GCLK_GENCTRL_ID_GCLKGEN2);
+	clock_init(GCLK_CLKCTRL_ID_TC1_TC2, GCLK_GENCTRL_ID_GCLKGEN0);
 
+	systick_init();
 	i2c_master_init(I2C1_MASTER, 400000, I2C1_MASTER_SCL, I2C1_MASTER_SDA);
 	ssd1306_init();
 	obui_init(&config);
-
-	pwm_init(TC1_COUNT8, TC_COUNT8_CTRLA_PRESCALER_DIV64);
-	pwm_init_counter(4);
 	ssd1306_init();
 	obui_init(&config);
+	pwm_init(TC1_COUNT8, TC_COUNT8_CTRLA_PRESCALER_DIV64);
+	pwm_init_counter(PWM);
+	button_init();
 
 	for (;;) {
-		int switch_pin;
+		uint8_t button = (PORT->IN >> BUTTON) & 1;
 
-		while ((switch_pin = (PORT->IN << SWITCH) & 1) == switch_prev);
-		switch_prev = switch_pin;
-		obui_set_button_state(switch_pin, 0);
-
-		switch (obui_get_event()) {
+		switch (obui_get_event(!button, systick_get_runtime_ms())) {
 		case OBUI_EVENT_NONE:
 			continue;
-		}
-
-		if (obui_mode == &mode_stop) {
-			pwm_set_duty_cycle(TC1_COUNT8, 0,
-			 PWM_OFF);
-		} else if (obui_mode == &mode_smt_activate) {
-			pwm_set_duty_cycle(TC1_COUNT8, 0,
-			 PWM_SMT_ACTIVATE_PASTE);
-		} else if (obui_mode == &mode_smt_solder) {
-			pwm_set_duty_cycle(TC1_COUNT8, 0,
-			 PWM_SMT_SOLDER_PASTE);
-		} else if (obui_mode == &mode_rework) {
-			pwm_set_duty_cycle(TC1_COUNT8, 0,
-			 PWM_OPTIMAL_FOR_REWORK);
-		} else if (obui_mode == &mode_reflow) {
-			pwm_set_duty_cycle(TC1_COUNT8, 0,
-			 PWM_OPTIMAL_FOR_REFLOW);
-		} else if (obui_mode == &mode_manual) {
-			pwm_set_duty_cycle(TC1_COUNT8, 0,
-			 param_heat.value * PWM_LIMIT_MAX / param_heat.max);
-		} else {
-			pwm_set_duty_cycle(TC1_COUNT8, 0, PWM_OFF);
-			assert(!"invalid mode!");
+		case OBUI_EVENT_MODE_SELECTED:
+			heat_update();
+			break;
+		case OBUI_EVENT_QUICK_ACTION:
+			heat_play_pause();
+			break;
 		}
 	}
 	return 0;
