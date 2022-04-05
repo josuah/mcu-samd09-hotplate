@@ -15,7 +15,7 @@ enum obui_button {
 
 struct obui_param {
 	char const *name, *unit;
-	uint64_t min, max, step, value;
+	int64_t min, max, step, value;
 };
 
 struct obui_mode {
@@ -37,13 +37,10 @@ extern void obui_fn_clear_screen(void);
 extern void obui_fn_flush_screen(void);
 
 /* set to a function formatting an integer `num` into a buffer `buf` of size `sz` */
-extern void obui_fn_fmtint(char *buf, size_t sz, uint64_t num);
+extern char *obui_fn_fmtint(char *buf, size_t sz, int64_t num);
 
-/* set to a function printing a text string with a 10px tall line */
-extern uint16_t obui_fn_draw_text_10px(uint16_t x, uint16_t y, char const *text);
-
-/* set to a function printing a text string with a 16px tall line */
-extern uint16_t obui_fn_draw_text_16px(uint16_t x, uint16_t y, char const *text);
+/* set to a function printing a text string at (`x`, `y`) character position */
+extern uint16_t obui_fn_draw_text(uint16_t x, uint16_t y, char const *text);
 
 /* next event to be handled, after `obui_mode` and `obui_config` got updated */
 static enum obui_event obui_get_event(enum obui_button state, uint64_t time_ms);
@@ -73,15 +70,15 @@ static struct obui_param *obui_param;
 static enum obui_screen obui_screen;
 static size_t obui_select_mode;
 static size_t obui_select_param;
-static uint64_t obui_select_value;
+static int64_t obui_select_value;
 
 static inline void
 obui_screen_intro(void)
 {
 	obui_fn_clear_screen();
 
-	obui_fn_draw_text_16px(0, 0, obui_config->name);
-	obui_fn_draw_text_10px(0, 16, obui_config->version);
+	obui_fn_draw_text(0, 0, obui_config->name);
+	obui_fn_draw_text(0, 16, obui_config->version);
 
 	obui_fn_flush_screen();
 }
@@ -95,10 +92,10 @@ obui_screen_select_mode(void)
 	obui_fn_clear_screen();
 
 	text = obui_config->modes[obui_select_mode]->name;
-	obui_fn_draw_text_16px(0, 0, text);
+	obui_fn_draw_text(0, 0, text);
 	for (size_t i = 0; obui_config->modes[i] != NULL; i++) {
 		char const *dot = (i == obui_select_mode) ? "o" : ".";
-		obui_fn_draw_text_10px(pos_x += 10, 16, dot);
+		obui_fn_draw_text(pos_x += 10, 16, dot);
 	}
 
 	obui_fn_flush_screen();
@@ -107,17 +104,17 @@ obui_screen_select_mode(void)
 static inline void
 obui_screen_select_value(void)
 {
-	char buf[50];
+	char buf[50], *s;
 	uint16_t pos_x = 0;
 
 	obui_fn_clear_screen();
 
-	obui_fn_fmtint(buf, sizeof buf, obui_param->value);
-	pos_x = obui_fn_draw_text_10px(pos_x, 0, "select ");
-	pos_x = obui_fn_draw_text_10px(pos_x, 0, obui_param->name);
-	pos_x = obui_fn_draw_text_10px(pos_x, 0, ": ");
-	pos_x = obui_fn_draw_text_16px(pos_x, 0, buf);
-	pos_x = obui_fn_draw_text_16px(pos_x, 0, obui_param->unit);
+	s = obui_fn_fmtint(buf, sizeof buf, obui_select_value);
+	pos_x = obui_fn_draw_text(pos_x, 0, "select ");
+	pos_x = obui_fn_draw_text(pos_x, 0, obui_param->name);
+	pos_x = obui_fn_draw_text(pos_x, 0, ": ");
+	pos_x = obui_fn_draw_text(pos_x, 0, s);
+	pos_x = obui_fn_draw_text(pos_x, 0, obui_param->unit);
 
 	obui_fn_flush_screen();
 }
@@ -125,17 +122,17 @@ obui_screen_select_value(void)
 static inline void
 obui_screen_status(void)
 {
-	char buf[50];
+	char buf[50], *s;
 	uint16_t pos_x = 0;
 
 	obui_fn_clear_screen();
 
-	obui_fn_fmtint(buf, sizeof buf, obui_config->main->value);
-	obui_fn_draw_text_10px(0, 0, obui_mode->name);
-	pos_x = obui_fn_draw_text_10px(pos_x, 10, obui_config->main->name);
-	pos_x = obui_fn_draw_text_10px(pos_x, 10, ": ");
-	pos_x = obui_fn_draw_text_16px(pos_x, 10, buf);
-	pos_x = obui_fn_draw_text_16px(pos_x, 10, obui_config->main->unit);
+	s = obui_fn_fmtint(buf, sizeof buf, obui_config->main->value);
+	obui_fn_draw_text(0, 0, obui_mode->name);
+	pos_x = obui_fn_draw_text(pos_x, 16, obui_config->main->name);
+	pos_x = obui_fn_draw_text(pos_x, 16, ": ");
+	pos_x = obui_fn_draw_text(pos_x, 16, s);
+	pos_x = obui_fn_draw_text(pos_x, 16, obui_config->main->unit);
 
 	obui_fn_flush_screen();
 }
@@ -230,13 +227,10 @@ obui_get_button_press(enum obui_button button, uint64_t time_ms)
 
 	switch (button) {
 	case OBUI_BUTTON_PRESSED:
-		PORT->DIRSET = 1u << 27;
-		PORT->OUTSET = 1u << 27;
 		if (button_prev != OBUI_BUTTON_PRESSED)
 			button_pressed_ms = time_ms;
 		break;
 	case OBUI_BUTTON_RELEASED:
-		PORT->OUTCLR = 1u << 27;
 		if (button_prev == OBUI_BUTTON_RELEASED)
 			break;
 		if (time_ms - button_pressed_ms >= obui_config->long_press_ms)
@@ -268,7 +262,6 @@ obui_get_event(enum obui_button button, uint64_t time_ms)
 		event = obui_event_status(press);
 		break;
 	}
-
 	if (press != OBUI_PRESS_NONE)
 		obui_refresh_screen();
 	return event;

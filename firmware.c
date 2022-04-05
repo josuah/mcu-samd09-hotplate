@@ -110,17 +110,11 @@ static struct obui_config config = {
 	},
 };
 
-static uint8_t heat_current_pwm;
-static uint8_t heat_last_pwm;
+static uint8_t heat_paused;
+static uint8_t heat_pwm;
 
 uint16_t
-obui_fn_draw_text_10px(uint16_t x, uint16_t y, char const *text)
-{
-	return draw_text(x, y, UINT16_MAX, &text, progmem_font_8);
-}
-
-uint16_t
-obui_fn_draw_text_16px(uint16_t x, uint16_t y, char const *text)
+obui_fn_draw_text(uint16_t x, uint16_t y, char const *text)
 {
 	return draw_text(x, y, UINT16_MAX, &text, progmem_font_13);
 }
@@ -137,10 +131,10 @@ obui_fn_clear_screen(void)
 	ssd1306_clear();
 }
 
-void
-obui_fn_fmtint(char *buf, size_t sz, uint64_t num)
+char *
+obui_fn_fmtint(char *buf, size_t sz, int64_t num)
 {
-	fmtint(buf, sz, num, 10);
+	return fmtint(buf, sz, num, 10);
 }
 
 int
@@ -165,34 +159,46 @@ draw_fn_point(uint16_t x, uint16_t y)
 static void
 heat_set_value_pwm(uint8_t pwm)
 {
-	heat_current_pwm = pwm;
-	param_heat.value = 100 * pwm / PWM_LIMIT_MAX;
-	pwm_set_duty_cycle(TC1_COUNT8, 0, pwm);
+	heat_pwm = pwm;
+	param_heat.value = 100 * heat_pwm / PWM_LIMIT_MAX;
+	pwm_set_duty_cycle(TC1_COUNT8, 0, heat_pwm);
 }
 
 static inline void
 heat_update(void)
 {
+	uint8_t pwm;
+
 	if (obui_mode == &mode_smt_activate) {
-		heat_set_value_pwm(PWM_SMT_ACTIVATE_PASTE);
+		pwm = PWM_SMT_ACTIVATE_PASTE;
 	} else if (obui_mode == &mode_smt_solder) {
-		heat_set_value_pwm(PWM_SMT_SOLDER_PASTE);
+		pwm = PWM_SMT_SOLDER_PASTE;
 	} else if (obui_mode == &mode_rework) {
-		heat_set_value_pwm(PWM_OPTIMAL_FOR_REWORK);
+		pwm = PWM_OPTIMAL_FOR_REWORK;
 	} else if (obui_mode == &mode_reflow) {
-		heat_set_value_pwm(PWM_OPTIMAL_FOR_REFLOW);
+		pwm = PWM_OPTIMAL_FOR_REFLOW;
 	} else if (obui_mode == &mode_manual) {
-		heat_set_value_pwm(param_heat.value * PWM_LIMIT_MAX / param_heat.max);
+		pwm = param_heat.value * PWM_LIMIT_MAX / param_heat.max;
 	} else {
-		heat_set_value_pwm(PWM_OFF);
 		assert(!"invalid mode!");
 	}
+	heat_set_value_pwm(pwm);
+	heat_paused = 0;
 }
 
 static inline void
 heat_play_pause(void)
 {
-	heat_set_value_pwm(heat_current_pwm == 0 ? heat_last_pwm : 0);
+	static heat_last_pwm = 0;
+
+	heat_paused = !heat_paused;
+	if (heat_paused) {
+		heat_last_pwm = heat_pwm;
+		heat_set_value_pwm(0);
+	} else {
+		heat_pwm = heat_last_pwm;
+		heat_set_value_pwm(heat_pwm);
+	}
 }
 
 static inline void
@@ -232,6 +238,7 @@ main(void)
 			heat_play_pause();
 			break;
 		}
+		obui_refresh_screen();
 	}
 	return 0;
 }
