@@ -5,12 +5,13 @@
 #include "libssd1306.h"
 #include "libdraw.h"
 #include "libobui.h"
+#include "libutil.h"
 #include "font.h"
 
-#define I2C1_MASTER_SCL		23
-#define I2C1_MASTER_SDA		22
-#define BUTTON			15
-#define PWM			4
+#define PIN_I2C1_MASTER_SCL		23
+#define PIN_I2C1_MASTER_SDA		22
+#define PIN_BUTTON			15
+#define PIN_PWM				4
 
 /*
  * Let the plate cool down.
@@ -20,18 +21,18 @@
 /*
  * 1st phase of SMT soldering: activate the solder paste
  */
-#define PWM_SMT_ACTIVATE_PASTE					0x00	// TODO: untested
+#define PWM_SMT_ACTIVATE_PASTE					0x18
 
 /*
  * 2nd phase of SMT soldering: raise the temperature to solder
  */
-#define PWM_SMT_SOLDER_PASTE					0x00	// TODO: untested
+#define PWM_SMT_SOLDER_PASTE					0x24
 
 /*
  * Anything hotter than that might make the tin at the bottom of
  * the board melt without adding hot air.
  */
-#define PWM_OPTIMAL_FOR_REWORK					0x15	// TODO: untested
+#define PWM_OPTIMAL_FOR_REWORK					0x20
 
 /*
  * After a long time, the tin foil becomes in-between liquid and
@@ -197,8 +198,8 @@ heat_play_pause(void)
 static inline void
 button_init(void)
 {
-	PORT->DIRCLR = 1u << BUTTON;
-	PORT->PINCFG[BUTTON] = PORT_PINCFG_INEN;
+	PORT->DIRCLR = 1u << PIN_BUTTON;
+	PORT->PINCFG[PIN_BUTTON] = PORT_PINCFG_INEN;
 }
 
 int
@@ -211,17 +212,15 @@ main(void)
 	clock_init(GCLK_CLKCTRL_ID_TC1_TC2, GCLK_GENCTRL_ID_GCLKGEN0);
 
 	systick_init();
-	i2c_master_init(I2C1_MASTER, 400000, I2C1_MASTER_SCL, I2C1_MASTER_SDA);
+	i2c_master_init(I2C1_MASTER, 400000, PIN_I2C1_MASTER_SCL, PIN_I2C1_MASTER_SDA);
 	ssd1306_init();
 	obui_init(&config);
-	ssd1306_init();
-	obui_init(&config);
-	pwm_init(TC1_COUNT8, TC_COUNT8_CTRLA_PRESCALER_DIV64);
-	pwm_init_counter(PWM);
+	pwm_init(TC1_COUNT8, TC_COUNT8_CTRLA_PRESCALER_DIV1024);
+	pwm_init_counter(PIN_PWM);
 	button_init();
 
 	for (;;) {
-		uint8_t button = (PORT->IN >> BUTTON) & 1;
+		uint8_t button = (PORT->IN >> PIN_BUTTON) & 1;
 
 		switch (obui_get_event(!button, systick_get_runtime_ms())) {
 		case OBUI_EVENT_NONE:
