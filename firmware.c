@@ -1,7 +1,5 @@
 #include "libc.h"
-#include "registers.h"
-#include "functions.h"
-
+#include "libsamd09.h"
 #include "libssd1306.h"
 #include "libdraw.h"
 #include "libobui.h"
@@ -189,7 +187,7 @@ heat_update(void)
 static inline void
 heat_play_pause(void)
 {
-	static heat_last_pwm = 0;
+	static int heat_last_pwm = 0;
 
 	heat_paused = !heat_paused;
 	if (heat_paused) {
